@@ -12,7 +12,7 @@ interface ForexCandle {
   close: number;
 }
 
-const FINNHUB_API_KEY = Deno.env.get("FINNHUB_API_KEY") || "";
+const FINNHUB_API_KEY = "d5jkobhr01qgsosgso90d5jkobhr01qgsosgso9g";
 
 const FOREX_PAIRS = {
   Asian: [
