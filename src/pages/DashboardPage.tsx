@@ -121,7 +121,7 @@ export default function DashboardPage() {
   const generateAndSaveSignal = async () => {
     setIsGenerating(true);
     setNoSignalMessage('');
-    const newSignal = generateSignal();
+    const newSignal = await generateSignal();
 
     if (newSignal && newSignal.confidence > 0) {
       const { data, error } = await supabase

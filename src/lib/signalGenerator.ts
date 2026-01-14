@@ -1,9 +1,27 @@
 import { MarketSession } from './types';
 
 const CURRENCY_PAIRS = {
-  Asian: ['USD/JPY', 'AUD/JPY', 'NZD/JPY', 'AUD/USD', 'NZD/USD'],
-  London: ['EUR/USD', 'GBP/USD', 'EUR/GBP', 'EUR/JPY', 'GBP/JPY'],
-  'New York': ['USD/CAD', 'EUR/USD', 'GBP/USD', 'USD/CHF', 'AUD/USD']
+  Asian: [
+    { symbol: 'USDJPY', display: 'USD/JPY' },
+    { symbol: 'AUDJPY', display: 'AUD/JPY' },
+    { symbol: 'NZDJPY', display: 'NZD/JPY' },
+    { symbol: 'AUDUSD', display: 'AUD/USD' },
+    { symbol: 'NZDUSD', display: 'NZD/USD' },
+  ],
+  London: [
+    { symbol: 'EURUSD', display: 'EUR/USD' },
+    { symbol: 'GBPUSD', display: 'GBP/USD' },
+    { symbol: 'EURGBP', display: 'EUR/GBP' },
+    { symbol: 'EURJPY', display: 'EUR/JPY' },
+    { symbol: 'GBPJPY', display: 'GBP/JPY' },
+  ],
+  'New York': [
+    { symbol: 'USDCAD', display: 'USD/CAD' },
+    { symbol: 'EURUSD', display: 'EUR/USD' },
+    { symbol: 'GBPUSD', display: 'GBP/USD' },
+    { symbol: 'USDCHF', display: 'USD/CHF' },
+    { symbol: 'AUDUSD', display: 'AUD/USD' },
+  ],
 };
 
 interface PriceData {
@@ -14,98 +32,52 @@ interface PriceData {
   close: number;
 }
 
-class MarketSimulator {
-  private prices: Map<string, PriceData[]> = new Map();
-  private trends: Map<string, 'up' | 'down' | 'neutral'> = new Map();
+class ForexDataProvider {
+  private cache: Map<string, PriceData[]> = new Map();
+  private cacheTimestamp: Map<string, number> = new Map();
+  private readonly CACHE_DURATION = 60000; // 1 minute cache
 
-  constructor() {
-    CURRENCY_PAIRS.Asian.concat(CURRENCY_PAIRS.London).concat(CURRENCY_PAIRS['New York']).forEach(pair => {
-      this.prices.set(pair, this.generateInitialPrices(pair));
-      this.trends.set(pair, 'neutral');
-    });
-  }
+  async getPriceHistory(pairDisplay: string, symbol: string, periods: number = 50): Promise<PriceData[]> {
+    const cached = this.cache.get(symbol);
+    const cachedTime = this.cacheTimestamp.get(symbol) || 0;
 
-  private generateInitialPrices(pair: string): PriceData[] {
-    const prices: PriceData[] = [];
-    let basePrice = this.getBasePrice(pair);
-    const now = Date.now();
-
-    for (let i = 50; i >= 0; i--) {
-      const timestamp = now - (i * 5 * 60 * 1000);
-      const volatility = 0.0005 * basePrice;
-      const trend = Math.sin(i / 10) * volatility;
-      const noise = (Math.random() - 0.5) * volatility * 2;
-
-      const open = basePrice;
-      const close = basePrice + trend + noise;
-      const high = Math.max(open, close) + Math.random() * volatility;
-      const low = Math.min(open, close) - Math.random() * volatility;
-
-      prices.push({ timestamp, open, high, low, close });
-      basePrice = close;
+    if (cached && Date.now() - cachedTime < this.CACHE_DURATION) {
+      return cached.slice(-periods);
     }
 
-    return prices;
-  }
+    try {
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-forex-data?symbol=${symbol}`;
 
-  private getBasePrice(pair: string): number {
-    const prices: Record<string, number> = {
-      'USD/JPY': 145.5,
-      'AUD/JPY': 99.2,
-      'NZD/JPY': 94.8,
-      'AUD/USD': 0.68,
-      'NZD/USD': 0.65,
-      'EUR/USD': 1.09,
-      'GBP/USD': 1.27,
-      'EUR/GBP': 0.86,
-      'EUR/JPY': 158.5,
-      'GBP/JPY': 184.2,
-      'USD/CAD': 1.35,
-      'USD/CHF': 0.88,
-    };
-    return prices[pair] || 1.0;
-  }
+      const response = await fetch(apiUrl, {
+        headers: {
+          'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
+        },
+      });
 
-  updatePrices(): void {
-    const now = Date.now();
-    CURRENCY_PAIRS.Asian.concat(CURRENCY_PAIRS.London).concat(CURRENCY_PAIRS['New York']).forEach(pair => {
-      const history = this.prices.get(pair) || [];
-      const lastPrice = history[history.length - 1];
-
-      const trend = this.trends.get(pair) || 'neutral';
-      const trendStrength = trend === 'up' ? 0.0005 : trend === 'down' ? -0.0005 : 0;
-
-      const volatility = 0.0008 * lastPrice.close;
-      const noise = (Math.random() - 0.5) * volatility;
-      const momentum = trendStrength * lastPrice.close;
-
-      const open = lastPrice.close;
-      const close = lastPrice.close + momentum + noise;
-      const high = Math.max(open, close) + Math.random() * volatility * 0.5;
-      const low = Math.min(open, close) - Math.random() * volatility * 0.5;
-
-      history.push({ timestamp: now, open, high, low, close });
-
-      if (history.length > 60) {
-        history.shift();
+      if (!response.ok) {
+        throw new Error('Failed to fetch forex data');
       }
 
-      if (Math.random() > 0.85) {
-        const trendOptions: Array<'up' | 'down' | 'neutral'> = ['up', 'down', 'neutral'];
-        this.trends.set(pair, trendOptions[Math.floor(Math.random() * trendOptions.length)]);
-      }
+      const data = await response.json();
+      const candles = data.candles || [];
 
-      this.prices.set(pair, history);
-    });
+      this.cache.set(symbol, candles);
+      this.cacheTimestamp.set(symbol, Date.now());
+
+      return candles.slice(-periods);
+    } catch (error) {
+      console.error(`Error fetching ${symbol}:`, error);
+      return cached || [];
+    }
   }
 
-  getPriceHistory(pair: string, periods: number = 20): PriceData[] {
-    const history = this.prices.get(pair) || [];
-    return history.slice(-periods);
+  clearCache(): void {
+    this.cache.clear();
+    this.cacheTimestamp.clear();
   }
 }
 
-const simulator = new MarketSimulator();
+const dataProvider = new ForexDataProvider();
 
 function calculateRSI(prices: PriceData[], period: number = 14): number {
   const closes = prices.map(p => p.close);
@@ -277,10 +249,8 @@ export function getNextFiveMinuteInterval(): { start: Date; end: Date } {
   return { start: nextInterval, end: endInterval };
 }
 
-export function analyzePattern(pair: string): { action: 'BUY' | 'SELL'; confidence: number } {
-  simulator.updatePrices();
-
-  const priceHistory = simulator.getPriceHistory(pair, 50);
+export async function analyzePattern(pair: { symbol: string; display: string }): Promise<{ action: 'BUY' | 'SELL'; confidence: number }> {
+  const priceHistory = await dataProvider.getPriceHistory(pair.display, pair.symbol, 50);
   if (priceHistory.length < 30) {
     return { action: 'BUY', confidence: 0 };
   }
@@ -389,15 +359,15 @@ export function analyzePattern(pair: string): { action: 'BUY' | 'SELL'; confiden
   return { action, confidence: Math.min(99, Math.max(45, confidence)) };
 }
 
-function analyzeMultiTimeframe(pair: string): number {
-  const shortTerm = simulator.getPriceHistory(pair, 20);
+async function analyzeMultiTimeframe(pair: { symbol: string; display: string }, priceHistory: PriceData[]): Promise<number> {
+  const shortTerm = priceHistory.slice(-20);
   if (shortTerm.length < 10) return 0;
 
   const short_rsi = calculateRSI(shortTerm);
   const short_trend = shortTerm[shortTerm.length - 1].close > shortTerm[0].close ? 1 : -1;
   const short_momentum = (shortTerm[shortTerm.length - 1].close - shortTerm[0].close) / shortTerm[0].close;
 
-  const allPrices = simulator.getPriceHistory(pair, 50);
+  const allPrices = priceHistory;
   const medium_rsi = calculateRSI(allPrices);
   const medium_trend = allPrices[allPrices.length - 1].close > allPrices[0].close ? 1 : -1;
   const medium_momentum = (allPrices[allPrices.length - 1].close - allPrices[0].close) / allPrices[0].close;
@@ -427,7 +397,7 @@ function analyzeMultiTimeframe(pair: string): number {
   return Math.min(1.2, mtfScore);
 }
 
-export function generateSignal(thresholdOverride?: number) {
+export async function generateSignal(thresholdOverride?: number) {
   const session = getCurrentSession();
   const pairs = session.pairs;
 
@@ -448,15 +418,22 @@ export function generateSignal(thresholdOverride?: number) {
 
   while (attempts < maxAttempts) {
     const pair = pairs[Math.floor(Math.random() * pairs.length)];
-    const { action, confidence } = analyzePattern(pair);
-    const mtf = analyzeMultiTimeframe(pair);
+    const priceHistory = await dataProvider.getPriceHistory(pair.display, pair.symbol, 50);
+
+    if (priceHistory.length < 30) {
+      attempts++;
+      continue;
+    }
+
+    const { action, confidence } = await analyzePattern(pair);
+    const mtf = await analyzeMultiTimeframe(pair, priceHistory);
     const mtfBoost = mtf > 1 ? (mtf - 1) * 8 : mtf * 4;
     const finalConfidence = Math.min(99, Math.round(confidence + mtfBoost));
 
     if (finalConfidence >= threshold) {
       validSignals.push({
         signal: {
-          pair,
+          pair: pair.display,
           action,
           confidence: finalConfidence,
           start_time: startTime.toISOString(),
