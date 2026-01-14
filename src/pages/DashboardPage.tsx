@@ -123,7 +123,7 @@ export default function DashboardPage() {
     setNoSignalMessage('');
     const newSignal = generateSignal();
 
-    if (newSignal) {
+    if (newSignal && newSignal.confidence > 0) {
       const { data, error } = await supabase
         .from('trading_signals')
         .insert([newSignal])
@@ -137,7 +137,7 @@ export default function DashboardPage() {
     } else {
       const savedSettings = localStorage.getItem('tradingSettings');
       const threshold = savedSettings ? JSON.parse(savedSettings).confidenceThreshold ?? 88 : 88;
-      setNoSignalMessage(`No signal found with confidence >= ${threshold}%. Try lowering the threshold in Settings.`);
+      setNoSignalMessage(`No signals met the ${threshold}% confidence threshold. The market may not have strong enough signals right now.`);
     }
     setIsGenerating(false);
   };

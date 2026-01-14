@@ -444,37 +444,45 @@ export function generateSignal(thresholdOverride?: number) {
 
   let attempts = 0;
   const maxAttempts = 50;
-  let bestSignal = null;
-  let bestConfidence = 0;
+  let validSignals: Array<{ signal: any; confidence: number }> = [];
 
   while (attempts < maxAttempts) {
     const pair = pairs[Math.floor(Math.random() * pairs.length)];
     const { action, confidence } = analyzePattern(pair);
+    const mtf = analyzeMultiTimeframe(pair);
+    const mtfBoost = mtf > 1 ? (mtf - 1) * 8 : mtf * 4;
+    const finalConfidence = Math.min(99, Math.round(confidence + mtfBoost));
 
-    if (confidence > bestConfidence) {
-      bestConfidence = confidence;
-      const mtf = analyzeMultiTimeframe(pair);
-      const mtfBoost = mtf > 1 ? (mtf - 1) * 8 : mtf * 4;
-      const finalConfidence = Math.min(99, Math.round(confidence + mtfBoost));
+    if (finalConfidence >= threshold) {
+      validSignals.push({
+        signal: {
+          pair,
+          action,
+          confidence: finalConfidence,
+          start_time: startTime.toISOString(),
+          end_time: endTime.toISOString(),
+          session: session.name
+        },
+        confidence: finalConfidence
+      });
 
-      bestSignal = {
-        pair,
-        action,
-        confidence: finalConfidence,
-        start_time: startTime.toISOString(),
-        end_time: endTime.toISOString(),
-        session: session.name
-      };
-
-      if (finalConfidence >= threshold) {
-        return bestSignal;
+      if (validSignals.length >= 3) {
+        break;
       }
     }
 
     attempts++;
   }
 
-  return bestSignal;
+  if (validSignals.length === 0) {
+    return null;
+  }
+
+  const bestValid = validSignals.reduce((best, current) =>
+    current.confidence > best.confidence ? current : best
+  );
+
+  return bestValid.signal;
 }
 
 export function getTimeUntilNextInterval(): number {
